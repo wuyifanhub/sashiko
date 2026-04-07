@@ -12,3 +12,4 @@ review_trees/
 sashiko.log
 Settings.toml
 email_policy.toml
+.*

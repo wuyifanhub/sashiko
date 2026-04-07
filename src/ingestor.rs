@@ -14,7 +14,9 @@
 
 use crate::db::Database;
 use crate::events::Event;
+use crate::imap::ImapClient;
 use crate::nntp::NntpClient;
+use crate::pop3::Pop3Client;
 use crate::settings::Settings;
 use anyhow::{Result, anyhow};
 use serde_json::Value;
@@ -127,6 +129,11 @@ impl Ingestor {
             if let Err(e) = self.run_git_bootstrap(n).await {
                 error!("Git bootstrap failed: {}", e);
             }
+        }
+
+        // Run email account ingestors (POP3/IMAP)
+        if !self.settings.email_accounts.is_empty() {
+            self.run_email_accounts().await?;
         }
 
         if self.nntp_enabled {
@@ -365,6 +372,220 @@ impl Ingestor {
             }
             sleep(Duration::from_secs(60)).await;
         }
+    }
+
+    /// Run email account ingestor (POP3/IMAP)
+    async fn run_email_accounts(&self) -> Result<()> {
+        if self.settings.email_accounts.is_empty() {
+            info!("No email accounts configured, skipping email ingestor");
+            return Ok(());
+        }
+
+        info!(
+            "Starting Email Account Ingestor for {} accounts",
+            self.settings.email_accounts.len()
+        );
+
+        loop {
+            for account in &self.settings.email_accounts {
+                if let Err(e) = self.process_email_account(account).await {
+                    error!(
+                        "Email account {}@{} ingestion failed: {}",
+                        account.username, account.server, e
+                    );
+                }
+            }
+            sleep(Duration::from_secs(60)).await;
+        }
+    }
+
+    /// Process a single email account
+    async fn process_email_account(&self, account: &crate::settings::EmailAccountSettings) -> Result<()> {
+        info!(
+            "Processing email account: {}@{}:{} ({})",
+            account.username, account.server, account.port, account.protocol
+        );
+
+        match account.protocol.as_str() {
+            "pop3" => self.process_pop3_account(account).await,
+            "pop3s" => self.process_pop3_account(account).await,
+            "imap" => self.process_imap_account(account).await,
+            "imaps" => self.process_imap_account(account).await,
+            _ => Err(anyhow!("Unsupported email protocol: {}", account.protocol)),
+        }
+    }
+
+    /// Process POP3/POP3S account
+    async fn process_pop3_account(&self, account: &crate::settings::EmailAccountSettings) -> Result<()> {
+        if account.use_ssl {
+            self.process_pop3_ssl_account(account).await
+        } else {
+            self.process_pop3_plain_account(account).await
+        }
+    }
+
+    /// Process POP3 plain (non-SSL) account
+    async fn process_pop3_plain_account(&self, account: &crate::settings::EmailAccountSettings) -> Result<()> {
+        use crate::pop3::Pop3Client;
+
+        let mut client = Pop3Client::connect(&account.server, account.port).await?;
+        self.do_pop3_fetch(&mut client, account).await
+    }
+
+    /// Process POP3 SSL account
+    async fn process_pop3_ssl_account(&self, account: &crate::settings::EmailAccountSettings) -> Result<()> {
+        use crate::pop3::Pop3Client;
+
+        let mut client = Pop3Client::connect_ssl(&account.server, account.port).await?;
+        self.do_pop3_fetch(&mut client, account).await
+    }
+
+    /// Common POP3 fetch logic
+    async fn do_pop3_fetch<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+        &self,
+        client: &mut Pop3Client<S>,
+        account: &crate::settings::EmailAccountSettings,
+    ) -> Result<()> {
+        client.auth(&account.username, &account.password).await?;
+        info!("POP3 authentication successful for {}", account.username);
+
+        // Get list of messages
+        let messages = client.list().await?;
+        info!("POP3 mailbox has {} messages", messages.len());
+
+        // Get UIDL to track which messages we've already processed
+        let uids = client.uidl().await?;
+
+        for uid_info in &uids {
+            // Check if we already processed this message
+            let uid_key = format!("pop3:{}:{}", account.username, uid_info.uid);
+            if self.db.get_last_article_num(&uid_key).await? > 0 {
+                continue; // Already processed
+            }
+
+            // Fetch the full message
+            match client.retr(uid_info.id).await {
+                Ok(lines) => {
+                    // Check if Subject contains patch filter keyword
+                    let has_patch = lines.iter().any(|line| {
+                        line.to_lowercase().starts_with("subject:") &&
+                        line.to_lowercase().contains(&account.patch_filter.to_lowercase())
+                    });
+
+                    if has_patch || account.patch_filter.is_empty() {
+                        info!("Fetching POP3 message {} (UID: {})", uid_info.id, uid_info.uid);
+                        self.sender
+                            .send(Event::ArticleFetched {
+                                group: format!("pop3://{}", account.username),
+                                article_id: uid_info.uid.clone(),
+                                content: lines,
+                                raw: None,
+                                baseline: None,
+                            })
+                            .await?;
+
+                        // Mark as processed
+                        self.db.update_last_article_num(&uid_key, uid_info.id as u64).await?;
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to fetch POP3 message {}: {}", uid_info.id, e);
+                }
+            }
+        }
+
+        client.quit().await?;
+        Ok(())
+    }
+
+    /// Process IMAP/IMAPS account
+    async fn process_imap_account(&self, account: &crate::settings::EmailAccountSettings) -> Result<()> {
+        if account.use_ssl {
+            self.process_imap_ssl_account(account).await
+        } else {
+            self.process_imap_plain_account(account).await
+        }
+    }
+
+    /// Process IMAP plain (non-SSL) account
+    async fn process_imap_plain_account(&self, account: &crate::settings::EmailAccountSettings) -> Result<()> {
+        use crate::imap::ImapClient;
+
+        let mut client = ImapClient::connect(&account.server, account.port).await?;
+        self.do_imap_fetch(&mut client, account).await
+    }
+
+    /// Process IMAP SSL account
+    async fn process_imap_ssl_account(&self, account: &crate::settings::EmailAccountSettings) -> Result<()> {
+        use crate::imap::ImapClient;
+
+        let mut client = ImapClient::connect_ssl(&account.server, account.port).await?;
+        self.do_imap_fetch(&mut client, account).await
+    }
+
+    /// Common IMAP fetch logic
+    async fn do_imap_fetch<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+        &self,
+        client: &mut ImapClient<S>,
+        account: &crate::settings::EmailAccountSettings,
+    ) -> Result<()> {
+        client.login(&account.username, &account.password).await?;
+        info!("IMAP authentication successful for {}", account.username);
+
+        // Select mailbox
+        let mailbox = if account.mailbox.is_empty() {
+            "INBOX".to_string()
+        } else {
+            account.mailbox.clone()
+        };
+        let status = client.select(&mailbox).await?;
+        info!("IMAP mailbox {} has {} messages", mailbox, status.exists);
+
+        // Search for patch emails
+        let search_criteria = format!("SUBJECT \"{}\"", account.patch_filter);
+        let message_ids = client.search(None, &search_criteria).await?;
+        info!("Found {} messages matching '{}'", message_ids.len(), search_criteria);
+
+        for msg_num in message_ids {
+            // Check if we already processed this message
+            let uid_key = format!("imap:{}:{}", account.username, msg_num);
+            if self.db.get_last_article_num(&uid_key).await? > 0 {
+                continue; // Already processed
+            }
+
+            // Fetch the full message
+            match client.fetch(&msg_num.to_string(), &["BODY[]", "UID"]).await {
+                Ok(responses) => {
+                    for response in responses {
+                        if let Some(uid) = response.uid {
+                            info!("Fetching IMAP message {} (UID: {})", msg_num, uid);
+
+                            // Convert body lines to string
+                            let content = response.body.unwrap_or_default();
+
+                            self.sender
+                                .send(Event::ArticleFetched {
+                                    group: format!("imap://{}/{}", account.username, mailbox),
+                                    article_id: uid.to_string(),
+                                    content,
+                                    raw: None,
+                                    baseline: None,
+                                })
+                                .await?;
+
+                            // Mark as processed
+                            self.db.update_last_article_num(&uid_key, msg_num as u64).await?;
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to fetch IMAP message {}: {}", msg_num, e);
+                }
+            }
+        }
+
+        client.logout().await?;
+        Ok(())
     }
 
     async fn process_nntp_cycle(&self) -> Result<()> {

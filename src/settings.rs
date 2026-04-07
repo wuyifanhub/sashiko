@@ -48,6 +48,34 @@ fn default_dry_run() -> bool {
 
 #[derive(Debug, Deserialize, Clone)]
 #[allow(unused)]
+pub struct EmailAccountSettings {
+    pub protocol: String,       // "pop3", "pop3s", "imap", "imaps"
+    pub server: String,
+    pub port: u16,
+    pub username: String,
+    pub password: String,
+    #[serde(default = "default_mailbox")]
+    pub mailbox: String,       // IMAP only: "INBOX", etc.
+    #[serde(default = "default_use_ssl")]
+    pub use_ssl: bool,
+    #[serde(default = "default_patch_filter")]
+    pub patch_filter: String, // Subject keyword to filter patches, e.g. "PATCH"
+}
+
+fn default_mailbox() -> String {
+    "INBOX".to_string()
+}
+
+fn default_use_ssl() -> bool {
+    true
+}
+
+fn default_patch_filter() -> String {
+    "PATCH".to_string()
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[allow(unused)]
 pub struct MailingListsSettings {
     #[serde(deserialize_with = "deserialize_string_or_vec")]
     pub track: Vec<String>,
@@ -253,6 +281,8 @@ pub struct Settings {
     pub nntp: NntpSettings,
     pub smtp: Option<SmtpSettings>,
     pub mailing_lists: MailingListsSettings,
+    #[serde(default)]
+    pub email_accounts: Vec<EmailAccountSettings>,
     pub ai: AiSettings,
     pub server: ServerSettings,
     pub git: GitSettings,
