@@ -215,7 +215,14 @@ impl OpenAiCompatClient {
                 tracing::error!("Failed to read OpenAI response body: {}", err_str);
                 OpenAiCompatError::TransientError(Duration::from_secs(30), err_str)
             })?;
-            match serde_json::from_str::<OpenAiResponse>(&body_text) {
+
+            let json_body = body_text
+            .trim()
+            .strip_prefix("data:")
+            .map(|s| s.trim_end_matches("\n\n"))
+            .unwrap_or(&body_text);
+    
+            match serde_json::from_str::<OpenAiResponse>(&json_body) {
                 Ok(response) => {
                     tracing::info!(
                         "OpenAI response received. Tokens: in={}, out={}",
