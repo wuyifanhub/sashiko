@@ -24,11 +24,16 @@ port = 119
 # dry_run = true
 
 [ai]
-provider = "gemini"
-model = "gemini-3.1-pro-preview"
-max_input_tokens = 900000
+provider = "openai-compatible"
+model = "qwen3.6-plus"
+max_input_tokens = 200000
 max_interactions = 50
 temperature = 1.0
+
+[ai.openai_compat]
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+context_window_size = 256000
+max_tokens = 56000
 
 # To use Claude Code CLI (fixed-cost subscription, no API key needed):
 # provider = "claude-cli"
@@ -41,14 +46,14 @@ prompt_caching = true
 
 [server]
 host = "127.0.0.1"
-port = 8080
+port = 9001
 
 [git]
 repository_path = "third_party/linux"
 
 [review]
-concurrency = 20
+concurrency = 1
 worktree_dir = "review_trees"
 timeout_seconds = 7200
-max_retries = 3
+max_retries = 0
 ignore_files = ["MAINTAINERS", ".mailmap", ".gitignore", "LICENSES/"]
