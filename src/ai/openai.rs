@@ -225,9 +225,10 @@ impl OpenAiCompatClient {
             match serde_json::from_str::<OpenAiResponse>(&json_body) {
                 Ok(response) => {
                     tracing::info!(
-                        "OpenAI response received. Tokens: in={}, out={}",
+                        "OpenAI response received. Tokens: in={}, out={}, {}",
                         response.usage.prompt_tokens,
-                        response.usage.completion_tokens
+                        response.usage.completion_tokens,
+                        json_body
                     );
                     return Ok(response);
                 }
@@ -504,12 +505,12 @@ fn estimate_tokens_generic(request: &AiRequest) -> usize {
 #[async_trait]
 impl AiProvider for OpenAiCompatClient {
     async fn generate_content(&self, request: AiRequest) -> Result<AiResponse> {
-        tracing::info!("Sending OpenAI request...");
-
+        
         let mut openai_req = translate_ai_request(request, self.max_tokens, self.provider_type)?;
         openai_req.model = self.model.clone();
-
+        
         let resp_body = serde_json::to_value(&openai_req)?;
+        tracing::info!("Sending OpenAI request: {:?}", resp_body);
         let resp = self.post_request(&resp_body).await?;
         translate_ai_response(resp)
     }
