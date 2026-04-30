@@ -1367,6 +1367,10 @@ async fn run_review_tool(
         cmd.arg("--no-ai");
     }
 
+    if settings.ai.no_tool {
+        cmd.arg("--no-tool");
+    }
+
     if let Some(path) = worktree_path {
         cmd.arg("--reuse-worktree").arg(path);
     }

@@ -83,6 +83,7 @@ pub struct WorkerConfig {
     pub custom_prompt: Option<String>,
     pub series_range: Option<String>,
     pub stages: Option<Vec<u8>>,
+    pub no_tool: bool,
 }
 
 pub struct WorkerResult {
@@ -375,6 +376,7 @@ pub struct Worker {
     series_range: Option<String>,
     context_tag: Option<String>,
     stages: Option<Vec<u8>>,
+    no_tool: bool,
 }
 
 impl Worker {
@@ -394,6 +396,7 @@ impl Worker {
             series_range: config.series_range,
             context_tag: None,
             stages: config.stages,
+            no_tool: config.no_tool,
         }
     }
 
@@ -1170,8 +1173,12 @@ Example:
             let request = crate::ai::AiRequest {
                 system: Some(system_prompt.clone()),
                 messages: local_history.clone(),
-                tools: Some(self.tools.get_declarations_generic()),
-                temperature: Some(self.temperature),
+                tools: if self.no_tool {
+                    None
+                } else {
+                    Some(self.tools.get_declarations_generic())
+                },
+                            temperature: Some(self.temperature),
 
                 response_format: None,
                 context_tag: self
@@ -1198,7 +1205,7 @@ Example:
             local_history.push(assistant_msg.clone());
             self.global_history.push(assistant_msg);
 
-            if let Some(tool_calls) = resp.tool_calls {
+            if !self.no_tool && let Some(tool_calls) = resp.tool_calls {
                 let mut tool_responses = Vec::new();
                 for call in tool_calls {
                     let result = match self

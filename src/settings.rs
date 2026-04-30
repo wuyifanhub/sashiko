@@ -146,6 +146,8 @@ pub struct AiSettings {
     pub temperature: f32,
     #[serde(default = "default_api_timeout_secs")]
     pub api_timeout_secs: u64,
+    #[serde(default)]
+    pub no_tool: bool,
     #[serde(skip, default)]
     pub no_ai: bool,
     // Provider-specific settings

@@ -61,6 +61,10 @@ struct Args {
     #[arg(long)]
     no_ai: bool,
 
+    /// If set, disable AI tool calls.
+    #[arg(long)]
+    no_tool: bool,
+
     /// If set, use this existing worktree path instead of creating a new one.
     /// The caller is responsible for cleanup.
     #[arg(long)]
@@ -399,6 +403,7 @@ async fn main() -> Result<()> {
                                 custom_prompt: args.custom_prompt.clone(),
                                 series_range,
                                 stages: args.stages.clone(),
+                                no_tool: args.no_tool || settings.ai.no_tool,
                             },
                         );
 

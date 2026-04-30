@@ -43,6 +43,10 @@ struct Cli {
     #[arg(long)]
     no_ai: bool,
 
+    /// Disable AI tool calls
+    #[arg(long)]
+    no_tool: bool,
+
     /// Port to listen on (overrides settings)
     #[arg(long)]
     port: Option<u16>,
@@ -136,6 +140,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if cli.no_ai {
         settings.ai.no_ai = true;
         info!("AI interactions disabled via --no-ai flag");
+    }
+
+    if cli.no_tool {
+        settings.ai.no_tool = true;
+        info!("AI tool calls disabled via --no-tool flag");
     }
 
     if cli.no_api {
